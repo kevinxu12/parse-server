@@ -278,11 +278,16 @@ class ParseServer {
         parseGraphQLServer.applyPlayground(app);
       }
     }
+    // DETAIL - comment out when running replay tests
     const server = await new Promise(resolve => {
       app.listen(options.port, options.host, function () {
         resolve(this);
       });
     });
+
+    // DETAIL - uncomment when running replay tests
+    // const server = app;
+
     this.server = server;
 
     if (options.startLiveQueryServer || options.liveQueryServerOptions) {
@@ -329,6 +334,7 @@ class ParseServer {
     if (!httpServer || (config && config.port)) {
       var app = express();
       httpServer = require('http').createServer(app);
+      // DETAIL - comment out when running replay tests
       httpServer.listen(config.port);
     }
     const server = new ParseLiveQueryServer(httpServer, config, options);
