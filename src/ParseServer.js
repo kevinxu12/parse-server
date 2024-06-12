@@ -9,50 +9,28 @@ var batch = require('./batch'),
   path = require('path'),
   fs = require('fs');
 
-import { ParseServerOptions, LiveQueryServerOptions } from './Options';
+import { LiveQueryServerOptions, ParseServerOptions } from './Options';
 import defaults from './defaults';
 import * as logging from './logger';
 import Config from './Config';
-import PromiseRouter from './PromiseRouter';
 import requiredParameter from './requiredParameter';
-import { AnalyticsRouter } from './Routers/AnalyticsRouter';
-import { ClassesRouter } from './Routers/ClassesRouter';
-import { FeaturesRouter } from './Routers/FeaturesRouter';
-import { FilesRouter } from './Routers/FilesRouter';
-import { FunctionsRouter } from './Routers/FunctionsRouter';
-import { GlobalConfigRouter } from './Routers/GlobalConfigRouter';
-import { GraphQLRouter } from './Routers/GraphQLRouter';
-import { HooksRouter } from './Routers/HooksRouter';
-import { IAPValidationRouter } from './Routers/IAPValidationRouter';
-import { InstallationsRouter } from './Routers/InstallationsRouter';
-import { LogsRouter } from './Routers/LogsRouter';
 import { ParseLiveQueryServer } from './LiveQuery/ParseLiveQueryServer';
-import { PagesRouter } from './Routers/PagesRouter';
-import { PublicAPIRouter } from './Routers/PublicAPIRouter';
-import { PushRouter } from './Routers/PushRouter';
-import { CloudCodeRouter } from './Routers/CloudCodeRouter';
-import { RolesRouter } from './Routers/RolesRouter';
-import { SchemasRouter } from './Routers/SchemasRouter';
-import { SessionsRouter } from './Routers/SessionsRouter';
-import { UsersRouter } from './Routers/UsersRouter';
-import { PurgeRouter } from './Routers/PurgeRouter';
-import { AudiencesRouter } from './Routers/AudiencesRouter';
-import { AggregateRouter } from './Routers/AggregateRouter';
-import { ParseServerRESTController } from './ParseServerRESTController';
 import * as controllers from './Controllers';
 import { ParseGraphQLServer } from './GraphQL/ParseGraphQLServer';
-import { SecurityRouter } from './Routers/SecurityRouter';
 import CheckRunner from './Security/CheckRunner';
 import Deprecator from './Deprecator/Deprecator';
 import { DefinedSchemas } from './SchemaMigrations/DefinedSchemas';
 import OptionsDefinitions from './Options/Definitions';
+import { api as apiApp, promiseRouter } from './api';
+import { app } from './app';
 
 // Mutate the Parse object to add the Cloud Code handlers
 addParseCloud();
 
-// ParseServer works like a constructor of an express app.
+// ParseServer works like a constructor of an express api.
 // https://parseplatform.org/parse-server/api/master/ParseServerOptions.html
 class ParseServer {
+
   /**
    * @constructor
    * @param {ParseServerOptions} options the parse server initialization options
@@ -134,7 +112,7 @@ class ParseServer {
   }
 
   /**
-   * Starts Parse Server as an express app; this promise resolves when Parse Server is ready to accept requests.
+   * Starts Parse Server as an express api; this promise resolves when Parse Server is ready to accept requests.
    */
 
   async start() {
@@ -241,125 +219,18 @@ class ParseServer {
 
   /**
    * @static
-   * Create an express app for the parse server
-   * @param {Object} options let you specify the maxUploadSize when creating the express app  */
+   * Create an express api for the parse server
+   * @param {Object} options let you specify the maxUploadSize when creating the express api  */
   static app(options) {
-    const { maxUploadSize = '20mb', appId, directAccess, pages, rateLimit = [] } = options;
-    // This app serves the Parse API directly.
-    // It's the equivalent of https://api.parse.com/1 in the hosted Parse API.
-    var api = express();
-    //api.use("/apps", express.static(__dirname + "/public"));
-    api.use(middlewares.allowCrossDomain(appId));
-    // File handling needs to be before default middlewares are applied
-    api.use(
-      '/',
-      new FilesRouter().expressRouter({
-        maxUploadSize: maxUploadSize,
-      })
-    );
-
-    api.use('/health', function (req, res) {
-      res.status(options.state === 'ok' ? 200 : 503);
-      if (options.state === 'starting') {
-        res.set('Retry-After', 1);
-      }
-      res.json({
-        status: options.state,
-      });
-    });
-
-    api.use(
-      '/',
-      bodyParser.urlencoded({ extended: false }),
-      pages.enableRouter
-        ? new PagesRouter(pages).expressRouter()
-        : new PublicAPIRouter().expressRouter()
-    );
-
-    api.use(bodyParser.json({ type: '*/*', limit: maxUploadSize }));
-    api.use(middlewares.allowMethodOverride);
-    api.use(middlewares.handleParseHeaders);
-    const routes = Array.isArray(rateLimit) ? rateLimit : [rateLimit];
-    for (const route of routes) {
-      middlewares.addRateLimit(route, options);
-    }
-    api.use(middlewares.handleParseSession);
-
-    const appRouter = ParseServer.promiseRouter({ appId });
-    api.use(appRouter.expressRouter());
-
-    api.use(middlewares.handleParseErrors);
-
-    // run the following when not testing
-    if (!process.env.TESTING) {
-      //This causes tests to spew some useless warnings, so disable in test
-      /* istanbul ignore next */
-      process.on('uncaughtException', err => {
-        if (err.code === 'EADDRINUSE') {
-          // user-friendly message for this common error
-          process.stderr.write(`Unable to listen on port ${err.port}. The port is already in use.`);
-          process.exit(0);
-        } else {
-          if (err.message) {
-            process.stderr.write('An uncaught exception occurred: ' + err.message);
-          }
-          if (err.stack) {
-            process.stderr.write('Stack Trace:\n' + err.stack);
-          } else {
-            process.stderr.write(err);
-          }
-          process.exit(1);
-        }
-      });
-      // verify the server url after a 'mount' event is received
-      /* istanbul ignore next */
-      api.on('mount', async function () {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        ParseServer.verifyServerUrl();
-      });
-    }
-    if (process.env.PARSE_SERVER_ENABLE_EXPERIMENTAL_DIRECT_ACCESS === '1' || directAccess) {
-      Parse.CoreManager.setRESTController(ParseServerRESTController(appId, appRouter));
-    }
-    return api;
+    return apiApp;
   }
 
-  static promiseRouter({ appId }) {
-    const routers = [
-      new ClassesRouter(),
-      new UsersRouter(),
-      new SessionsRouter(),
-      new RolesRouter(),
-      new AnalyticsRouter(),
-      new InstallationsRouter(),
-      new FunctionsRouter(),
-      new SchemasRouter(),
-      new PushRouter(),
-      new LogsRouter(),
-      new IAPValidationRouter(),
-      new FeaturesRouter(),
-      new GlobalConfigRouter(),
-      new GraphQLRouter(),
-      new PurgeRouter(),
-      new HooksRouter(),
-      new CloudCodeRouter(),
-      new AudiencesRouter(),
-      new AggregateRouter(),
-      new SecurityRouter(),
-    ];
-
-    const routes = routers.reduce((memo, router) => {
-      return memo.concat(router.routes);
-    }, []);
-
-    const appRouter = new PromiseRouter(routes, appId);
-
-    batch.mountOnto(appRouter);
-    return appRouter;
+  static promiseRouter(opts) {
+    promiseRouter(opts)
   }
 
   /**
-   * starts the parse server's express app
+   * starts the parse server's express api
    * @param {ParseServerOptions} options to use to start the server
    * @returns {ParseServer} the parse server instance
    */
@@ -371,7 +242,6 @@ class ParseServer {
       console.error('Error on ParseServer.startApp: ', e);
       throw e;
     }
-    const app = express();
     if (options.middleware) {
       let middleware;
       if (typeof options.middleware == 'string') {
@@ -408,11 +278,16 @@ class ParseServer {
         parseGraphQLServer.applyPlayground(app);
       }
     }
+    // DETAIL - comment out when running replay tests
     const server = await new Promise(resolve => {
       app.listen(options.port, options.host, function () {
         resolve(this);
       });
     });
+
+    // DETAIL - uncomment when running replay tests
+    // const server = app;
+
     this.server = server;
 
     if (options.startLiveQueryServer || options.liveQueryServerOptions) {
@@ -440,7 +315,7 @@ class ParseServer {
    */
   static async startApp(options: ParseServerOptions) {
     const parseServer = new ParseServer(options);
-    return parseServer.startApp(options);
+    return await parseServer.startApp(options);
   }
 
   /**
@@ -459,6 +334,7 @@ class ParseServer {
     if (!httpServer || (config && config.port)) {
       var app = express();
       httpServer = require('http').createServer(app);
+      // DETAIL - comment out when running replay tests
       httpServer.listen(config.port);
     }
     const server = new ParseLiveQueryServer(httpServer, config, options);
@@ -482,7 +358,7 @@ class ParseServer {
       if (!isValidHttpUrl(url)) {
         console.warn(
           `\nWARNING, Unable to connect to '${Parse.serverURL}' as the URL is invalid.` +
-            ` Cloud code and push notifications may be unavailable!\n`
+          ` Cloud code and push notifications may be unavailable!\n`
         );
         return;
       }
@@ -498,7 +374,7 @@ class ParseServer {
         /* eslint-disable no-console */
         console.warn(
           `\nWARNING, Unable to connect to '${Parse.serverURL}'.` +
-            ` Cloud code and push notifications may be unavailable!\n`
+          ` Cloud code and push notifications may be unavailable!\n`
         );
         /* eslint-enable no-console */
         return;
@@ -551,9 +427,9 @@ function injectDefaults(options: ParseServerOptions) {
   if (options.userSensitiveFields) {
     /* eslint-disable no-console */
     !process.env.TESTING &&
-      console.warn(
-        `\nDEPRECATED: userSensitiveFields has been replaced by protectedFields allowing the ability to protect fields in all classes with CLP. \n`
-      );
+    console.warn(
+      `\nDEPRECATED: userSensitiveFields has been replaced by protectedFields allowing the ability to protect fields in all classes with CLP. \n`
+    );
     /* eslint-enable no-console */
 
     const userSensitiveFields = Array.from(
